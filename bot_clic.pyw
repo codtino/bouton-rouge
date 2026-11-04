@@ -252,9 +252,15 @@ def normaliser(s):
     return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
 
 
+def lettres(s):
+    """Seulement lettres et chiffres, sans accents ni majuscules : « Ven. 13 nov. » -> « ven13nov »."""
+    return "".join(c for c in normaliser(s) if c.isalnum())
+
+
 def trouver_texte(recherche, mots):
-    """Toutes les positions (centre x, centre y) où le texte apparaît, de haut en bas."""
-    cible = " ".join(normaliser(recherche).split())
+    """Toutes les positions (centre x, centre y) où le texte apparaît, de haut en bas.
+    Les espaces, la ponctuation, les accents et les majuscules sont ignorés."""
+    cible = lettres(recherche)
     if not cible:
         return []
     lignes = {}
@@ -262,16 +268,14 @@ def trouver_texte(recherche, mots):
         lignes.setdefault(m[0], []).append(m)
     trouves = []
     for ligne in lignes.values():
-        debuts, morceaux, pos = [], [], 0
-        for m in ligne:
-            debuts.append(pos)
-            morceaux.append(normaliser(m[5]))
-            pos += len(morceaux[-1]) + 1
-        texte = " ".join(morceaux)
+        texte, mot_de = "", []  # mot_de[k] = numéro du mot d'où vient la lettre k
+        for j, m in enumerate(ligne):
+            l = lettres(m[5])
+            texte += l
+            mot_de += [j] * len(l)
         k = texte.find(cible)
         while k != -1:
-            premier = max(j for j, d in enumerate(debuts) if d <= k)
-            dernier = max(j for j, d in enumerate(debuts) if d <= k + len(cible) - 1)
+            premier, dernier = mot_de[k], mot_de[k + len(cible) - 1]
             boites = ligne[premier:dernier + 1]
             x1 = min(b[1] for b in boites)
             y1 = min(b[2] for b in boites)
@@ -282,8 +286,20 @@ def trouver_texte(recherche, mots):
     return sorted(trouves, key=lambda p: (p[1], p[0]))
 
 
+TEXTE_LU = os.path.join(tempfile.gettempdir(), "bot_clic_texte_lu.txt")
+
+
 def scanner(recherche):
-    return trouver_texte(recherche, lire_ecran())
+    mots = lire_ecran()
+    # Garde ce qui a été lu, pour pouvoir le montrer si le texte n'est pas trouvé
+    lignes = {}
+    for m in mots:
+        lignes.setdefault(m[0], []).append(m)
+    with open(TEXTE_LU, "w", encoding="utf-8") as f:
+        f.write(f"Texte lu à l'écran le {dt.datetime.now():%d/%m à %H:%M:%S}  (position x, y : texte)\n\n")
+        for l in lignes.values():
+            f.write(f"({l[0][1]}, {l[0][2]})  " + " ".join(m[5] for m in l) + "\n")
+    return trouver_texte(recherche, mots)
 
 # ---------------------------------------------------------------- réglages
 
@@ -413,11 +429,13 @@ class DialogueEtape(tk.Toplevel):
             ttk.Combobox(f, textvariable=self.v_abs, values=["Arrêter le bot", "Passer à la suite"],
                          state="readonly", width=18).grid(row=4, column=1, columnspan=2, sticky="w", pady=3)
             ttk.Button(f, text="🔍 Tester le scanner…", command=self.tester_scanner).grid(
-                row=5, column=0, columnspan=3, sticky="we", pady=(8, 2))
+                row=5, column=0, columnspan=2, sticky="we", pady=(8, 2))
+            ttk.Button(f, text="📄 Voir le texte lu", command=self.voir_texte_lu).grid(
+                row=5, column=2, sticky="we", pady=(8, 2), padx=(4, 0))
             self.v_res = tk.StringVar()
             ttk.Label(f, textvariable=self.v_res, foreground="#0a6", justify="left").grid(row=6, column=0, columnspan=3, sticky="w")
             ttk.Label(f, text="Les ordres « n° » vont de haut en bas, puis de gauche à droite.\n"
-                              "Majuscules et accents ne comptent pas.", **gris).grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                              "Majuscules, accents, espaces et ponctuation ne comptent pas.", **gris).grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         b = ttk.Frame(f)
         b.grid(row=10, column=0, columnspan=4, sticky="e", pady=(12, 0))
@@ -457,7 +475,8 @@ class DialogueEtape(tk.Toplevel):
             if erreur:
                 self.v_res.set(f"Erreur : {erreur}")
             elif not trouves:
-                self.v_res.set(f"« {texte} » n'a pas été trouvé à l'écran.")
+                self.v_res.set(f"« {texte} » n'a pas été trouvé à l'écran.\n"
+                               "Clique sur « Voir le texte lu » pour voir ce que le scanner a lu.")
             else:
                 liste = ", ".join(f"n°{i + 1} ({x}, {y})" for i, (x, y) in enumerate(trouves[:6]))
                 self.v_res.set(f"Trouvé {len(trouves)} fois : {liste}\n(les points rouges montrent où)")
@@ -465,6 +484,12 @@ class DialogueEtape(tk.Toplevel):
         self.grab_release()
         self.v_res.set("")
         self.app.compte_a_rebours(scanner_puis_montrer, (self,))
+
+    def voir_texte_lu(self):
+        if os.path.exists(TEXTE_LU):
+            os.startfile(TEXTE_LU)
+        else:
+            self.v_res.set("Lance d'abord « Tester le scanner ».")
 
     def valider(self):
         t = self.e["type"]
