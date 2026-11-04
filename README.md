@@ -1,12 +1,18 @@
 # Bouton rouge
 
 - `index.html` : le site avec le bouton rouge et le compteur — https://codtino.github.io/bouton-rouge/
-- `bot_clic.pyw` : un bot (Windows, Python sans rien à installer) qui ouvre le navigateur à l'heure choisie et clique à la position choisie.
+- `bot_clic.pyw` : un bot (Windows, Python sans rien à installer) qui, à l'heure choisie, ouvre un site puis exécute une liste de tâches.
 
 ## Utiliser le bot
 
-1. Double-clique sur `bot_clic.pyw`.
-2. Choisis l'heure, puis **Choisir la position…** : le site s'ouvre, clique sur le bouton rouge.
-3. Règle le nombre de clics, puis **▶ Activer le bot**. Laisse la fenêtre ouverte (réduite si tu veux).
+1. Lance `bot_clic.pyw` (raccourci « Bot clic » sur le Bureau, ou `pyw bot_clic.pyw`).
+2. Choisis le site à ouvrir et l'heure.
+3. Construis la liste des tâches, exécutées dans l'ordre :
+   - **+ Clic** : un clic (ou plusieurs) à une position de l'écran, choisie en cliquant dessus ;
+   - **+ Texte** : écrit un texte là où se trouve le curseur (mets un clic sur la zone de texte avant) ;
+   - **+ Touche** : Entrée, Tab, Échap, flèches, Ctrl+A, Ctrl+V…
+   - **+ Attente** : patiente quelques secondes (le temps qu'une page charge).
+4. **Tester maintenant** pour vérifier, puis **▶ Activer le bot**. Laisse la fenêtre ouverte (réduite si tu veux).
 
-Pour arrêter les clics en cours : mets la souris dans un coin de l'écran.
+Double-clic sur une tâche pour la modifier ; ▲ / ▼ pour changer l'ordre.
+Pour arrêter en cours de route : mets la souris dans un coin de l'écran.
