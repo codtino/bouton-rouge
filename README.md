@@ -8,7 +8,8 @@
 1. Lance `bot_clic.pyw` (raccourci « Bot clic » sur le Bureau, ou `pyw bot_clic.pyw`).
 2. Choisis le site à ouvrir et l'heure.
 3. Construis la liste des tâches, exécutées dans l'ordre :
-   - **+ Clic** : un clic (ou plusieurs) à une position de l'écran, choisie en cliquant dessus ;
+   - **+ Chercher** : scanne l'écran (reconnaissance de texte de Windows), trouve un texte et garde sa position sous un nom, ex. `[position1]` ;
+   - **+ Clic** : un clic (ou plusieurs) sur une position trouvée par « Chercher » (avec un décalage possible) ou à une position fixe choisie sur l'écran ;
    - **+ Texte** : écrit un texte là où se trouve le curseur (mets un clic sur la zone de texte avant) ;
    - **+ Touche** : Entrée, Tab, Échap, flèches, Ctrl+A, Ctrl+V…
    - **+ Attente** : patiente quelques secondes (le temps qu'une page charge).
