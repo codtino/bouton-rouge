@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bouton Rouge</title>
+  <style>
+    :root {
+      --bg: #f4f4f5;
+      --text: #18181b;
+      --muted: #71717a;
+      --red: #e11d2e;
+      --red-dark: #9f1220;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111113;
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2.5rem;
+      padding: 16px;
+      user-select: none;
+    }
+    .compteur {
+      text-align: center;
+    }
+    .compteur span {
+      display: block;
+      font-size: clamp(3.5rem, 15vw, 7rem);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .compteur small {
+      color: var(--muted);
+      font-size: 1rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    #bouton {
+      width: min(60vw, 240px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: radial-gradient(circle at 35% 30%, #ff6b78, var(--red) 55%, var(--red-dark));
+      box-shadow: 0 12px 0 var(--red-dark), 0 20px 30px rgba(0,0,0,.35);
+      transition: transform .06s, box-shadow .06s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #bouton:active {
+      transform: translateY(10px);
+      box-shadow: 0 2px 0 var(--red-dark), 0 6px 12px rgba(0,0,0,.35);
+    }
+    #bouton:focus-visible { outline: 4px solid var(--text); outline-offset: 8px; }
+    #reset {
+      background: none;
+      border: 1px solid var(--muted);
+      color: var(--muted);
+      padding: .5rem 1.2rem;
+      border-radius: 999px;
+      font-size: .9rem;
+      cursor: pointer;
+    }
+    #reset:hover { color: var(--text); border-color: var(--text); }
+    .pop { animation: pop .15s ease-out; }
+    @keyframes pop { 50% { transform: scale(1.15); } }
+  </style>
+</head>
+<body>
+  <div class="compteur">
+    <span id="valeur">0</span>
+    <small>clics</small>
+  </div>
+
+  <button id="bouton" aria-label="Appuyer sur le bouton rouge"></button>
+
+  <button id="reset">Remettre à zéro</button>
+
+  <script>
+    const valeur = document.getElementById('valeur');
+    let compte = 0;
+    try { compte = parseInt(localStorage.getItem('compte') || '0', 10) || 0; } catch (e) {}
+
+    function afficher() {
+      valeur.textContent = compte.toLocaleString('fr-FR');
+      try { localStorage.setItem('compte', compte); } catch (e) {}
+    }
+
+    document.getElementById('bouton').addEventListener('click', () => {
+      compte++;
+      afficher();
+      valeur.classList.remove('pop');
+      void valeur.offsetWidth;
+      valeur.classList.add('pop');
+    });
+
+    document.getElementById('reset').addEventListener('click', () => {
+      compte = 0;
+      afficher();
+    });
+
+    afficher();
+  </script>
+</body>
+</html>
