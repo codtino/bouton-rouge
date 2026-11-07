@@ -8,6 +8,7 @@
 1. Lance `bot_clic.pyw` (raccourci « Bot clic » sur le Bureau, ou `pyw bot_clic.pyw`).
 2. Choisis le site à ouvrir et l'heure.
 3. Construis la liste des tâches, exécutées dans l'ordre :
+   - **+ Bouton** : clique sur un bouton, lien, onglet ou champ du site ouvert dans Chrome, choisi dans la liste des boutons de la page (il est retrouvé par son nom, même s'il a bougé, et la page défile si besoin) ;
    - **+ Chercher** : scanne l'écran (reconnaissance de texte de Windows), trouve un texte et garde sa position sous un nom, ex. `[position1]` ;
    - **+ Clic** : un clic (ou plusieurs) sur une position trouvée par « Chercher » (avec un décalage possible) ou à une position fixe choisie sur l'écran ;
    - **+ Texte** : écrit un texte là où se trouve le curseur (mets un clic sur la zone de texte avant) ;

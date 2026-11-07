@@ -301,6 +301,162 @@ def scanner(recherche):
             f.write(f"({l[0][1]}, {l[0][2]})  " + " ".join(m[5] for m in l) + "\n")
     return trouver_texte(recherche, mots)
 
+# ---------------------------------------------------------------- boutons de Chrome (accessibilité Windows)
+
+user32.GetForegroundWindow.restype = ctypes.c_void_p
+user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
+for _f in ("IsWindowVisible", "IsIconic", "GetWindowTextLengthW", "GetClassNameW"):
+    getattr(user32, _f).argtypes = [ctypes.c_void_p] + ([ctypes.c_wchar_p, ctypes.c_int] if _f == "GetClassNameW" else [])
+kernel32 = ctypes.windll.kernel32
+kernel32.OpenProcess.restype = ctypes.c_void_p
+kernel32.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD)]
+kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+ROLES = {"Button": "Bouton", "Hyperlink": "Lien", "ListItem": "Élément de liste", "TabItem": "Onglet",
+         "ComboBox": "Champ / liste", "Edit": "Champ de texte", "CheckBox": "Case à cocher",
+         "RadioButton": "Choix", "MenuItem": "Menu", "DataItem": "Case"}
+TOUS_TYPES = "N'importe quel type"
+
+
+def est_chrome(h):
+    if not h or not user32.IsWindowVisible(h):
+        return False
+    classe = ctypes.create_unicode_buffer(64)
+    user32.GetClassNameW(h, classe, 64)
+    if classe.value != "Chrome_WidgetWin_1":
+        return False
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+    proc = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not proc:
+        return False
+    chemin = ctypes.create_unicode_buffer(520)
+    taille = wintypes.DWORD(520)
+    ok = kernel32.QueryFullProcessImageNameW(proc, 0, chemin, ctypes.byref(taille))
+    kernel32.CloseHandle(proc)
+    return bool(ok) and chemin.value.lower().endswith("\\chrome.exe")
+
+
+def fenetre_chrome():
+    """La fenêtre Chrome au premier plan, sinon la plus haute fenêtre Chrome visible."""
+    devant = user32.GetForegroundWindow()
+    if est_chrome(devant):
+        return devant
+    trouvees = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, ctypes.c_void_p, wintypes.LPARAM)
+    def chaque(h, _):
+        if est_chrome(h) and not user32.IsIconic(h) and user32.GetWindowTextLengthW(h) > 0:
+            trouvees.append(h)
+            return False
+        return True
+    user32.EnumWindows(chaque, 0)
+    return trouvees[0] if trouvees else None
+
+
+UIA_PS = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$cs = @'
+using System; using System.Text; using System.Collections.Generic;
+using System.Windows.Automation; using System.Runtime.InteropServices;
+public static class BotUia {
+  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  static readonly ControlType[] Types = { ControlType.Button, ControlType.Hyperlink, ControlType.MenuItem, ControlType.ListItem,
+    ControlType.RadioButton, ControlType.CheckBox, ControlType.TabItem, ControlType.ComboBox, ControlType.Edit, ControlType.DataItem };
+  static List<AutomationElement> Elements(long hwnd) {
+    SetProcessDPIAware();
+    var w = AutomationElement.FromHandle(new IntPtr(hwnd));
+    var cr = new CacheRequest(); cr.TreeFilter = Automation.RawViewCondition;
+    cr.Add(AutomationElement.NameProperty); cr.Add(AutomationElement.ControlTypeProperty);
+    cr.Add(AutomationElement.BoundingRectangleProperty); cr.Add(AutomationElement.IsOffscreenProperty);
+    var conds = new Condition[Types.Length];
+    for (int i = 0; i < Types.Length; i++) conds[i] = new PropertyCondition(AutomationElement.ControlTypeProperty, Types[i]);
+    var res = new List<AutomationElement>();
+    using (cr.Activate()) {
+      var pages = w.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ClassNameProperty, "Chrome_RenderWidgetHostHWND"));
+      foreach (AutomationElement p in pages) {
+        var pr = p.Cached.BoundingRectangle;
+        if (pr.IsEmpty || pr.Width < 50) continue;
+        foreach (AutomationElement e in p.FindAll(TreeScope.Descendants, new OrCondition(conds))) {
+          var c = e.Cached;
+          if (string.IsNullOrWhiteSpace(c.Name) || c.BoundingRectangle.IsEmpty) continue;
+          res.Add(e);
+        }
+      }
+    }
+    return res;
+  }
+  public static string Lister(long hwnd) {
+    var sb = new StringBuilder();
+    foreach (var e in Elements(hwnd)) {
+      var c = e.Cached; var r = c.BoundingRectangle;
+      sb.Append(c.ControlType.ProgrammaticName.Replace("ControlType.", "")).Append('\t')
+        .Append(c.Name.Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ').Trim()).Append('\t')
+        .Append((int)r.X).Append('\t').Append((int)r.Y).Append('\t').Append((int)r.Width).Append('\t').Append((int)r.Height).Append('\t')
+        .Append(c.IsOffscreen ? 1 : 0).Append('\n');
+    }
+    return sb.ToString();
+  }
+  public static string Defiler(long hwnd, int index) {
+    var els = Elements(hwnd);
+    if (index < 0 || index >= els.Count) return "absent";
+    object p;
+    if (els[index].TryGetCurrentPattern(ScrollItemPattern.Pattern, out p)) { ((ScrollItemPattern)p).ScrollIntoView(); return "ok"; }
+    return "impossible";
+  }
+}
+'@
+Add-Type -TypeDefinition $cs -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase
+if ($env:BOT_CLIC_ACTION -eq 'defiler') { [BotUia]::Defiler([long]$env:BOT_CLIC_HWND, [int]$env:BOT_CLIC_INDEX) }
+else { [BotUia]::Lister([long]$env:BOT_CLIC_HWND) }
+"""
+
+
+def _uia(hwnd, action="lister", index=0):
+    env = dict(os.environ, BOT_CLIC_HWND=str(hwnd), BOT_CLIC_ACTION=action, BOT_CLIC_INDEX=str(index))
+    commande = base64.b64encode(UIA_PS.encode("utf-16-le")).decode()
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", commande],
+                       capture_output=True, env=env, timeout=60, creationflags=0x08000000)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.decode("utf-8", "replace").strip()[:300] or "lecture de la page impossible")
+    return r.stdout.decode("utf-8", "replace")
+
+
+def lister_boutons(hwnd):
+    """Éléments cliquables de la page : [{role, nom, x, y, l, h, cache, index}, ...]."""
+    boutons = []
+    for ligne in _uia(hwnd).splitlines():
+        champs = ligne.split("\t")
+        if len(champs) == 7:
+            boutons.append({"role": champs[0], "nom": champs[1], "x": int(champs[2]), "y": int(champs[3]),
+                            "l": int(champs[4]), "h": int(champs[5]), "cache": champs[6] == "1", "index": len(boutons)})
+    return boutons
+
+
+def correspondances(boutons, nom, role):
+    """Boutons qui portent ce nom (nom exact d'abord, sinon nom qui le contient)."""
+    cible = lettres(nom)
+    bons = [b for b in boutons if role in (None, b["role"])]
+    exacts = [b for b in bons if lettres(b["nom"]) == cible]
+    return exacts or [b for b in bons if cible and cible in lettres(b["nom"])]
+
+
+def trouver_bouton(e, hwnd):
+    """Position (x, y) du centre du bouton de la tâche, en faisant défiler la page si besoin. None si absent."""
+    role = e.get("role")
+    for essai in range(2):
+        trouves = correspondances(lister_boutons(hwnd), e["nom"], role)
+        if len(trouves) < e.get("occurrence", 1):
+            return None
+        b = trouves[e.get("occurrence", 1) - 1]
+        if not b["cache"]:
+            return b["x"] + b["l"] // 2, b["y"] + b["h"] // 2
+        if essai == 0:  # plus bas dans la page : on fait défiler jusqu'à lui
+            _uia(hwnd, "defiler", b["index"])
+            time.sleep(0.8)
+    return None
+
 # ---------------------------------------------------------------- réglages
 
 def charger_config():
@@ -343,13 +499,18 @@ def decrire(e):
     if t == "chercher":
         n = f" (n°{e['occurrence']})" if e["occurrence"] > 1 else ""
         return f"🔍  Chercher « {e['texte']} »{n} → [{e['variable']}]"
+    if t == "bouton":
+        n = f" (n°{e['occurrence']})" if e["occurrence"] > 1 else ""
+        quoi = ROLES.get(e.get("role"), "Élément") if e.get("role") else "Élément"
+        return f"🔘  {quoi} « {e['nom']} »{n}"
     return t
 
 # ---------------------------------------------------------------- fenêtre d'une tâche
 
 class DialogueEtape(tk.Toplevel):
     TITRES = {"clic": "Clic", "texte": "Écrire du texte", "touche": "Appuyer sur une touche",
-              "attente": "Attendre", "chercher": "Chercher un texte à l'écran"}
+              "attente": "Attendre", "chercher": "Chercher un texte à l'écran",
+              "bouton": "Cliquer sur un bouton du site"}
     FIXE = "la position fixe ci-dessous"
 
     def __init__(self, app, etape):
@@ -436,6 +597,46 @@ class DialogueEtape(tk.Toplevel):
             ttk.Label(f, textvariable=self.v_res, foreground="#0a6", justify="left").grid(row=6, column=0, columnspan=3, sticky="w")
             ttk.Label(f, text="Les ordres « n° » vont de haut en bas, puis de gauche à droite.\n"
                               "Majuscules, accents, espaces et ponctuation ne comptent pas.", **gris).grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        elif t == "bouton":
+            ttk.Button(f, text="📋 Lister les boutons de la page Chrome…", command=self.lister).grid(
+                row=0, column=0, columnspan=3, sticky="we")
+            ttk.Label(f, text="Filtrer :").grid(row=1, column=0, sticky="w", pady=(6, 0))
+            self.v_filtre = tk.StringVar()
+            self.v_filtre.trace_add("write", lambda *_: self.remplir())
+            ttk.Entry(f, textvariable=self.v_filtre).grid(row=1, column=1, columnspan=2, sticky="we", pady=(6, 0))
+            cadre = ttk.Frame(f)
+            cadre.grid(row=2, column=0, columnspan=3, sticky="we", pady=4)
+            self.boite = tk.Listbox(cadre, width=62, height=12, activestyle="none", font=("Segoe UI", 9))
+            barre = ttk.Scrollbar(cadre, orient="vertical", command=self.boite.yview)
+            self.boite.configure(yscrollcommand=barre.set)
+            self.boite.pack(side="left", fill="both")
+            barre.pack(side="left", fill="y")
+            self.boite.bind("<<ListboxSelect>>", lambda _: self.choisi())
+            self.boite.bind("<Double-1>", lambda _: self.valider())
+            self.boutons, self.affiches = [], []
+            self.boite.insert("end", "  Clique sur « Lister les boutons » avec ta page ouverte dans Chrome.")
+
+            ttk.Label(f, text="Nom du bouton :").grid(row=3, column=0, sticky="w")
+            self.v_nom = tk.StringVar(value=self.e.get("nom", ""))
+            ttk.Entry(f, textvariable=self.v_nom, width=40).grid(row=3, column=1, columnspan=2, sticky="we", pady=3)
+            ttk.Label(f, text="Type :").grid(row=4, column=0, sticky="w")
+            self.v_role = tk.StringVar(value=ROLES.get(self.e.get("role"), TOUS_TYPES))
+            ttk.Combobox(f, textvariable=self.v_role, values=[TOUS_TYPES] + sorted(set(ROLES.values())),
+                         state="readonly", width=20).grid(row=4, column=1, sticky="w", pady=3)
+            ttk.Label(f, text="S'il y en a plusieurs, prendre le n° :").grid(row=5, column=0, sticky="w")
+            self.v_occ = tk.StringVar(value=str(self.e.get("occurrence", 1)))
+            ttk.Spinbox(f, from_=1, to=50, textvariable=self.v_occ, width=5).grid(row=5, column=1, sticky="w", pady=3)
+            ttk.Label(f, text="Chercher pendant au plus (s) :").grid(row=6, column=0, sticky="w")
+            self.v_del = tk.StringVar(value=str(self.e.get("delai", 10)))
+            ttk.Spinbox(f, from_=0, to=600, textvariable=self.v_del, width=5).grid(row=6, column=1, sticky="w", pady=3)
+            ttk.Label(f, text="S'il n'est pas trouvé :").grid(row=7, column=0, sticky="w")
+            self.v_abs = tk.StringVar(value="Passer à la suite" if self.e.get("si_absent") == "continuer" else "Arrêter le bot")
+            ttk.Combobox(f, textvariable=self.v_abs, values=["Arrêter le bot", "Passer à la suite"],
+                         state="readonly", width=18).grid(row=7, column=1, sticky="w", pady=3)
+            self.v_res = tk.StringVar()
+            ttk.Label(f, textvariable=self.v_res, foreground="#0a6", justify="left").grid(row=8, column=0, columnspan=3, sticky="w")
+            ttk.Label(f, text="Le bot retrouve le bouton par son nom, même s'il a bougé sur la page,\n"
+                              "et fait défiler la page s'il est plus bas.", **gris).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         b = ttk.Frame(f)
         b.grid(row=10, column=0, columnspan=4, sticky="e", pady=(12, 0))
@@ -485,6 +686,57 @@ class DialogueEtape(tk.Toplevel):
         self.v_res.set("")
         self.app.compte_a_rebours(scanner_puis_montrer, (self,))
 
+    # -- liste des boutons de la page
+    def lister(self):
+        def lire_page():
+            hwnd = fenetre_chrome()
+            erreur = None
+            try:
+                self.boutons = lister_boutons(hwnd) if hwnd else []
+            except Exception as ex:
+                self.boutons, erreur = [], str(ex)
+            self.app.root.deiconify()
+            self.deiconify()
+            self.lift()
+            self.grab_set()
+            if erreur:
+                self.v_res.set(f"Erreur : {erreur}")
+            elif not hwnd:
+                self.v_res.set("Aucune fenêtre Chrome trouvée.")
+            elif not self.boutons:
+                self.v_res.set("Aucun bouton lu. Attends que la page soit chargée et réessaie.")
+            else:
+                self.v_res.set(f"{len(self.boutons)} éléments trouvés. Choisis le bon dans la liste.")
+            self.remplir()
+        self.grab_release()
+        self.v_res.set("")
+        self.app.compte_a_rebours(lire_page, (self,))
+
+    def remplir(self):
+        if not hasattr(self, "boite") or not self.boutons:
+            return
+        filtre = lettres(self.v_filtre.get())
+        self.affiches = [b for b in self.boutons if filtre in lettres(b["nom"])]
+        self.boite.delete(0, "end")
+        for b in self.affiches:
+            nom = b["nom"] if len(b["nom"]) <= 70 else b["nom"][:70] + "…"
+            plus_bas = "   (plus bas dans la page)" if b["cache"] else ""
+            self.boite.insert("end", f"  {ROLES.get(b['role'], b['role'])} — {nom}{plus_bas}")
+
+    def choisi(self):
+        s = self.boite.curselection()
+        if not s or not self.affiches:
+            return
+        b = self.affiches[s[0]]
+        self.v_nom.set(b["nom"])
+        self.v_role.set(ROLES.get(b["role"], TOUS_TYPES))
+        meme = correspondances(self.boutons, b["nom"], b["role"])
+        self.v_occ.set(str(next((k + 1 for k, m in enumerate(meme) if m["index"] == b["index"]), 1)))
+        if len(meme) > 1:
+            self.v_res.set(f"Il y a {len(meme)} « {b['nom'][:30]} » sur la page : c'est le n°{self.v_occ.get()}.")
+        else:
+            self.v_res.set("")
+
     def voir_texte_lu(self):
         if os.path.exists(TEXTE_LU):
             os.startfile(TEXTE_LU)
@@ -517,6 +769,13 @@ class DialogueEtape(tk.Toplevel):
                 if not self.v_txt.get().strip() or not nom:
                     raise ValueError
                 self.e.update(texte=self.v_txt.get().strip(), variable=nom, occurrence=max(1, int(self.v_occ.get())),
+                              delai=max(0.0, float(self.v_del.get().replace(",", "."))),
+                              si_absent="continuer" if self.v_abs.get() == "Passer à la suite" else "arreter")
+            elif t == "bouton":
+                if not lettres(self.v_nom.get()):
+                    raise ValueError
+                role = next((k for k, v in ROLES.items() if v == self.v_role.get()), None)
+                self.e.update(nom=self.v_nom.get().strip(), role=role, occurrence=max(1, int(self.v_occ.get())),
                               delai=max(0.0, float(self.v_del.get().replace(",", "."))),
                               si_absent="continuer" if self.v_abs.get() == "Passer à la suite" else "arreter")
         except ValueError:
@@ -575,7 +834,8 @@ class App:
 
         c = ttk.Frame(f)
         c.grid(row=4, column=4, sticky="n", padx=(6, 0))
-        for txt, cmd in (("+ Chercher", lambda: self.ajouter("chercher")),
+        for txt, cmd in (("+ Bouton", lambda: self.ajouter("bouton")),
+                         ("+ Chercher", lambda: self.ajouter("chercher")),
                          ("+ Clic", lambda: self.ajouter("clic")),
                          ("+ Texte", lambda: self.ajouter("texte")),
                          ("+ Touche", lambda: self.ajouter("touche")),
@@ -800,7 +1060,50 @@ class App:
             delai = int(e["secondes"] * 1000)
         elif t == "chercher":
             return self.chercher(i, e, time.time() + e["delai"])
+        elif t == "bouton":
+            return self.bouton(i, e, time.time() + e["delai"])
         self.root.after(delai, lambda: self.executer(i + 1, 0))
+
+    def en_fond(self, fonction, suite):
+        """Lance `fonction` dans un fil à part (la fenêtre ne fige pas), puis `suite(resultat, erreur)`."""
+        resultat = queue.Queue()
+
+        def travail():
+            try:
+                resultat.put((fonction(), None))
+            except Exception as ex:
+                resultat.put((None, str(ex)))
+        threading.Thread(target=travail, daemon=True).start()
+
+        def attendre():
+            if souris_dans_coin():
+                return self.fin("Arrêté (souris dans un coin).")
+            try:
+                suite(*resultat.get_nowait())
+            except queue.Empty:
+                self.root.after(100, attendre)
+        attendre()
+
+    def bouton(self, i, e, limite):
+        hwnd = fenetre_chrome()
+
+        def suite(pos, erreur):
+            if erreur:
+                return self.fin(f"Erreur en lisant la page : {erreur}")
+            if pos:
+                cliquer(*pos)
+                self.v_statut.set(f"Tâche {i + 1} : clic sur « {e['nom'][:40]} » en ({pos[0]}, {pos[1]})")
+                return self.root.after(300, lambda: self.executer(i + 1, 0))
+            if time.time() < limite:
+                self.v_statut.set(f"Tâche {i + 1} : j'attends le bouton « {e['nom'][:40]} »…")
+                return self.root.after(700, lambda: self.bouton(i, e, limite))
+            if e.get("si_absent") == "continuer":
+                return self.root.after(150, lambda: self.executer(i + 1, 0))
+            self.fin(f"Tâche {i + 1} : bouton « {e['nom'][:40]} » introuvable sur la page.")
+
+        if not hwnd:
+            return suite(None, None)
+        self.en_fond(lambda: trouver_bouton(e, hwnd), suite)
 
     def chercher(self, i, e, limite):
         """Scanne l'écran (dans un fil à part pour ne pas figer la fenêtre) jusqu'à trouver le texte."""
